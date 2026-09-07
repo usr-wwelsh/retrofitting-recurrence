@@ -23,7 +23,7 @@ done
 # Compare against base SmolLM2-360M as the non-inferiority reference point
 # (no mean_recurrence arg -- it isn't a recurrent model):
 CUDA_VISIBLE_DEVICES=0 lm_eval --model hf \
-    --model_args pretrained=convert_pretrained_model/models/SmolLM2-360M,add_bos_token=True,dtype="float32" \
+    --model_args pretrained=HuggingFaceTB/SmolLM2-360M,add_bos_token=True,dtype="float32" \
     --tasks arc_easy,arc_challenge,hellaswag,mmlu,piqa,winogrande \
     --device cuda \
     --output_path "${OUT_ROOT}/SmolLM2-360M-base" \

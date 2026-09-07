@@ -28,7 +28,7 @@
 # below; slower per-step but correct. This script defaults to the safe
 # (fp32) setting -- flip NO_AMP to false yourself once you've checked.
 
-MODEL_PATH="convert_pretrained_model/models/Recurrent-SmolLM2-360M--4-14-4"
+MODEL_PATH="usr-wwelsh/Recurrent-SmolLM2-360M-4-14-4"   # private HF Hub repo -- run `huggingface-cli login` first
 DATA_PATH="data/smollm2_recurrent_mix"   # output of mix_smollm2_corpus.py
 RUN_NAME="smollm2-recurrent-v1"
 NO_AMP=true
