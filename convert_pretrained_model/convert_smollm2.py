@@ -190,12 +190,16 @@ def check_same(looped_smollm2, smollm2_huginn, tokenizer):
     print(f"Values close: {close_values}")
     print(f"Mean Squared Error: {mse:.6f}")
 
-    for idx, (hug_layer, llama_layer) in enumerate(
-        zip(huginn_out.hidden_states, llama_out.hidden_states)
-    ):
-        close = torch.allclose(hug_layer, llama_layer, atol=1e-4, rtol=1e-4)
-        layer_mse = torch.nn.functional.mse_loss(hug_layer, llama_layer).item()
-        print(f"{idx}: {close}, {layer_mse:.3f}")
+    # The production modeling variant returns only the final hidden state
+    # (not a per-layer list like the compare variant), so only the final
+    # state is comparable to Llama's last hidden_states entry.
+    hug_final = huginn_out.hidden_states
+    llama_final = llama_out.hidden_states[-1]
+    if hug_final.dim() != llama_final.dim():
+        hug_final = hug_final.unsqueeze(0)
+    close = torch.allclose(hug_final, llama_final, atol=1e-4, rtol=1e-4)
+    final_mse = torch.nn.functional.mse_loss(hug_final, llama_final).item()
+    print(f"final hidden state: {close}, {final_mse:.3f}")
 
 
 def main():
