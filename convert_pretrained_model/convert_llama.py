@@ -4,7 +4,10 @@ import os
 
 def get_edited_model(model_name, extra_args={}):
     config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-    if ("llama" in model_name.lower()):
+    is_llama_arch = "llama" in model_name.lower() or "LlamaForCausalLM" in getattr(
+        config, "architectures", []
+    )
+    if is_llama_arch:
         config_args = {
             "model_type": "looped_llama2",
             "auto_map": {"AutoModelForCausalLM": "looped_llama.LoopedLlamaForCausalLM"},

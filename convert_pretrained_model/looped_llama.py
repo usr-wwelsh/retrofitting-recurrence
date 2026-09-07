@@ -58,6 +58,13 @@ class LoopConfig:
     coda_size = None
     prelude_size = None
     remove_layers = "none"
+    # explicit index lists: when core_idx is set, these override start_index/
+    # block_size/prelude_size/coda_size entirely, allowing a non-contiguous
+    # recurrent block (e.g. one chosen by per-layer importance analysis
+    # instead of a single contiguous slice)
+    prelude_idx = None
+    core_idx = None
+    coda_idx = None
 
     def __init__(self, config: dict = None):
         if config:
@@ -128,14 +135,19 @@ class LoopedLlamaModel(LlamaModel):
     def rec_post_init(self, args, extra_tensors):
         self.loop_config = LoopConfig(args)
 
-        i, j = self.loop_config.start_index, self.loop_config.block_size
-        prelude_ind, rec_layers_ind, coda_ind = self.get_split(
-            self.loop_config.num_rec, self.loop_config.remove_layers, i, j
-        )
-        if self.loop_config.coda_size is not None:
-            coda_ind = coda_ind[:self.loop_config.coda_size]
-        if self.loop_config.prelude_size is not None:
-            prelude_ind = prelude_ind[:self.loop_config.prelude_size]
+        if self.loop_config.core_idx is not None:
+            prelude_ind = self.loop_config.prelude_idx
+            rec_layers_ind = self.loop_config.core_idx
+            coda_ind = self.loop_config.coda_idx
+        else:
+            i, j = self.loop_config.start_index, self.loop_config.block_size
+            prelude_ind, rec_layers_ind, coda_ind = self.get_split(
+                self.loop_config.num_rec, self.loop_config.remove_layers, i, j
+            )
+            if self.loop_config.coda_size is not None:
+                coda_ind = coda_ind[:self.loop_config.coda_size]
+            if self.loop_config.prelude_size is not None:
+                prelude_ind = prelude_ind[:self.loop_config.prelude_size]
 
         print(f"regular model: {list(range(self.config.num_hidden_layers))}")
         print(f"prelude: {prelude_ind}")
