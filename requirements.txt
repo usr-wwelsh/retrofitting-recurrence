@@ -5,8 +5,9 @@ datasets
 transformers 
 wandb 
 torchdata 
-jsonargparse 
+jsonargparse
 lm_eval[math]
+trl
 matplotlib
 seaborn
 git+https://github.com/mcleish7/Muon.git
