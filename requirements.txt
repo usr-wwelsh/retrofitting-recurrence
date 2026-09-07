@@ -2,9 +2,9 @@ torch
 natsort
 huggingface_hub
 datasets 
-transformers 
-wandb 
-torchdata 
+transformers==4.51.0
+wandb
+torchdata
 jsonargparse
 lm_eval[math]
 trl
