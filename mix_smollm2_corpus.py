@@ -36,9 +36,10 @@ SOURCES = {
 }
 
 
-def load_source(spec, seed):
+def load_source(spec, seed, shuffle_buffer_size):
     ds = load_dataset(spec["path"], spec["name"], split="train", streaming=True)
-    ds = ds.shuffle(seed=seed, buffer_size=10_000)
+    if shuffle_buffer_size > 0:
+        ds = ds.shuffle(seed=seed, buffer_size=shuffle_buffer_size)
     if "text" not in ds.features:
         raise ValueError(
             f"{spec['path']}/{spec['name']} has no 'text' column -- "
@@ -54,6 +55,8 @@ def process(
     token_budget: int = 500_000_000,
     rows_per_shard: int = 20_000,
     seed: int = 42,
+    shuffle_buffer_size: int = 10_000,
+    log_every: int = 1_000,
 ):
     """
     Args:
@@ -65,6 +68,10 @@ def process(
         rows_per_shard: packed rows buffered in memory before flushing a
             shard -- keeps peak memory bounded independent of token_budget.
         seed: shuffle/interleave seed.
+        shuffle_buffer_size: per-source streaming shuffle buffer; a source
+            yields nothing until this many of its examples have been fetched,
+            so lower it (e.g. 0 to disable) for quick local smoke tests.
+        log_every: print progress every this many raw documents consumed.
     """
     os.makedirs(save_path, exist_ok=True)
 
@@ -76,7 +83,7 @@ def process(
     total_weight = sum(weights)
     probabilities = [w / total_weight for w in weights]
 
-    streams = [load_source(spec, seed) for spec in SOURCES.values()]
+    streams = [load_source(spec, seed, shuffle_buffer_size) for spec in SOURCES.values()]
     mixed = interleave_datasets(streams, probabilities=probabilities, seed=seed)
 
     block_len = max_length + 1
@@ -94,7 +101,10 @@ def process(
         rows = []
         shard_idx += 1
 
-    for example in mixed:
+    for doc_idx, example in enumerate(mixed, start=1):
+        if doc_idx % log_every == 0:
+            print(f"consumed {doc_idx:,} docs, {total_tokens_written:,} tokens packed so far")
+
         ids = tokenizer(example["text"], add_special_tokens=False)["input_ids"]
         buffer.append(tokenizer.bos_token_id)
         buffer.extend(ids)
