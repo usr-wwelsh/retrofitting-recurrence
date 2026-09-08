@@ -70,6 +70,7 @@ class CLISettings:
         default_factory=lambda: dict(warmup=0.1, cooldown=0.1, min_lr_ratio=0.001)
     ) # min_lr = min_lr_ratio * lr
     save_interval: int = -1
+    hub_checkpoint_repo: Optional[str] = None # if set, push each full resumable checkpoint here (HF dataset repo) and keep only the latest, instead of accumulating checkpoints on local disk
     model_name: str = "smcleish/Recurrent-TinyLlama-3T-untrained"
     wandb_disabled: bool = False
     seed: int = 74
@@ -156,6 +157,13 @@ def save_model_only(cfg, state, chkpt_name):
     unwrapped_model.save_pretrained(f"{cfg.out_path}/{cfg.run_name}/{chkpt_name}")
     state["tokenizer"].save_pretrained(f"{cfg.out_path}/{cfg.run_name}/{chkpt_name}")
 
+    # keep only the most recent eval checkpoint on disk -- these are full fp32
+    # weights and accumulate fast otherwise
+    run_dir = f"{cfg.out_path}/{cfg.run_name}"
+    for name in os.listdir(run_dir):
+        if name.startswith("model_only_chkpt_") and name != chkpt_name:
+            shutil.rmtree(f"{run_dir}/{name}", ignore_errors=True)
+
 def save_checkpoint(state, agg_vars_dict, cfg):
     # agg_vars_dict = {"data_start_step": data_start_step, "optimizer_step": optimizer_step, "total_tokens": total_tokens, "total_tokens_with_loss": total_tokens_with_loss}
     step = agg_vars_dict["optimizer_step"]
@@ -197,6 +205,30 @@ def save_checkpoint(state, agg_vars_dict, cfg):
     os.makedirs(chkpt_dir, exist_ok=True)
     torch.save(ckpt, f"{chkpt_dir}/chkpt.pt")
     print(f"[rank 0] Saved checkpoint @ step {step:,}")
+
+    if cfg.hub_checkpoint_repo is not None:
+        push_checkpoint_to_hub(cfg.hub_checkpoint_repo, chkpt_dir, step)
+
+    # keep only the most recent full checkpoint on disk -- these include optimizer
+    # state (~2x model size) and a full resume only ever needs the latest one
+    run_dir = f"{cfg.out_path}/{cfg.run_name}"
+    for name in os.listdir(run_dir):
+        if name.startswith("checkpoint_") and name != f"checkpoint_{step}":
+            shutil.rmtree(f"{run_dir}/{name}", ignore_errors=True)
+
+def push_checkpoint_to_hub(repo_id, chkpt_dir, step):
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    api.create_repo(repo_id, repo_type="dataset", private=True, exist_ok=True)
+    api.upload_file(
+        path_or_fileobj=f"{chkpt_dir}/chkpt.pt",
+        path_in_repo="chkpt.pt",
+        repo_id=repo_id,
+        repo_type="dataset",
+        commit_message=f"checkpoint @ step {step}",
+    )
+    print(f"[rank 0] Pushed checkpoint @ step {step:,} to {repo_id} (overwriting previous)")
 
 def load_checkpoint(state, cfg, device):
     ckpt = torch.load(f"{cfg.resume_path}/chkpt.pt", map_location=device)

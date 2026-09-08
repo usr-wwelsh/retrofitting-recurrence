@@ -28,15 +28,17 @@
 # below; slower per-step but correct. This script defaults to the safe
 # (fp32) setting -- flip NO_AMP to false yourself once you've checked.
 
-MODEL_PATH="usr-wwelsh/Recurrent-SmolLM2-360M-4-14-4"   # private HF Hub repo -- run `huggingface-cli login` first
+MODEL_PATH="usr-wwelsh/Recurrent-SmolLM2-360M-4-14-4"   # public HF Hub repo
 DATA_PATH="data/smollm2_recurrent_mix"   # output of mix_smollm2_corpus.py
 RUN_NAME="smollm2-recurrent-v1"
 NO_AMP=true
+HUB_CHECKPOINT_REPO="usr-wwelsh/smollm2-recurrent-checkpoints"   # private HF dataset repo; run `huggingface-cli login` first. Holds only the latest resumable checkpoint -- train.py overwrites it in place and prunes the local copy on every save, so this never accumulates.
 
 python train.py \
     --run_name="${RUN_NAME}" \
     --out_path=huginn_smollm2 \
     --model_name="${MODEL_PATH}" \
+    --hub_checkpoint_repo="${HUB_CHECKPOINT_REPO}" \
     --preprocessed_data_path="${DATA_PATH}" \
     --is_parquet_dataset=true \
     --max_length=1024 \
