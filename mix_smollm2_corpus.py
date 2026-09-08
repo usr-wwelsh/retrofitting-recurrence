@@ -49,7 +49,7 @@ def load_source(spec, seed, shuffle_buffer_size):
 
 
 def process(
-    tokenizer_name: str = "convert_pretrained_model/models/SmolLM2-360M",
+    tokenizer_name: str = "usr-wwelsh/Recurrent-SmolLM2-360M-4-14-4",
     save_path: str = "data/smollm2_recurrent_mix",
     max_length: int = 1024,
     token_budget: int = 500_000_000,
