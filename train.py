@@ -73,6 +73,7 @@ class CLISettings:
     hub_checkpoint_repo: Optional[str] = None # if set, push each full resumable checkpoint here (HF dataset repo) and keep only the latest, instead of accumulating checkpoints on local disk
     model_name: str = "smcleish/Recurrent-TinyLlama-3T-untrained"
     wandb_disabled: bool = False
+    wandb_project: str = "huginn"
     seed: int = 74
     fix_num_steps: bool = False
     init_from_scratch: bool = False
@@ -649,7 +650,7 @@ def startup(cfg: CLISettings):
     cfg.world_size = world_size
     if is_main_process():
         wandb.init(
-            project=cfg.out_path,
+            project=cfg.wandb_project,
             name=cfg.run_name,
             config=cfg,
             dir=cfg.out_path,
