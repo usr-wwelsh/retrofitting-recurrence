@@ -32,7 +32,7 @@ MODEL_PATH="usr-wwelsh/Recurrent-SmolLM2-360M-4-14-4"   # public HF Hub repo
 DATA_PATH="data/smollm2_recurrent_mix"   # output of mix_smollm2_corpus.py
 RUN_NAME="smollm2-recurrent-v1"
 NO_AMP=true
-HUB_CHECKPOINT_REPO="usr-wwelsh/smollm2-recurrent-checkpoints"   # private HF dataset repo; run `huggingface-cli login` first. Holds only the latest resumable checkpoint -- train.py overwrites it in place and prunes the local copy on every save, so this never accumulates.
+HUB_CHECKPOINT_REPO="usr-wwelsh/smollm2-recurrent-checkpoints"   # private HF dataset repo; run `huggingface-cli login` first. Holds only the latest resumable checkpoint per RUN_NAME (at "${RUN_NAME}/chkpt.pt") -- train.py overwrites it in place and prunes the local copy on every save, so this never accumulates.
 
 python train.py \
     --run_name="${RUN_NAME}" \

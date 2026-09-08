@@ -207,7 +207,7 @@ def save_checkpoint(state, agg_vars_dict, cfg):
     print(f"[rank 0] Saved checkpoint @ step {step:,}")
 
     if cfg.hub_checkpoint_repo is not None:
-        push_checkpoint_to_hub(cfg.hub_checkpoint_repo, chkpt_dir, step)
+        push_checkpoint_to_hub(cfg.hub_checkpoint_repo, cfg.run_name, chkpt_dir, step)
 
     # keep only the most recent full checkpoint on disk -- these include optimizer
     # state (~2x model size) and a full resume only ever needs the latest one
@@ -216,19 +216,21 @@ def save_checkpoint(state, agg_vars_dict, cfg):
         if name.startswith("checkpoint_") and name != f"checkpoint_{step}":
             shutil.rmtree(f"{run_dir}/{name}", ignore_errors=True)
 
-def push_checkpoint_to_hub(repo_id, chkpt_dir, step):
+def push_checkpoint_to_hub(repo_id, run_name, chkpt_dir, step):
+    # namespaced by run_name so unrelated runs (e.g. a smoke test and the
+    # real run) sharing one repo can never resume from each other's state
     from huggingface_hub import HfApi
 
     api = HfApi()
     api.create_repo(repo_id, repo_type="dataset", private=True, exist_ok=True)
     api.upload_file(
         path_or_fileobj=f"{chkpt_dir}/chkpt.pt",
-        path_in_repo="chkpt.pt",
+        path_in_repo=f"{run_name}/chkpt.pt",
         repo_id=repo_id,
         repo_type="dataset",
-        commit_message=f"checkpoint @ step {step}",
+        commit_message=f"{run_name} checkpoint @ step {step}",
     )
-    print(f"[rank 0] Pushed checkpoint @ step {step:,} to {repo_id} (overwriting previous)")
+    print(f"[rank 0] Pushed checkpoint @ step {step:,} to {repo_id}/{run_name} (overwriting previous)")
 
 def load_checkpoint(state, cfg, device):
     ckpt = torch.load(f"{cfg.resume_path}/chkpt.pt", map_location=device)
