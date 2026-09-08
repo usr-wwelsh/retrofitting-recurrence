@@ -25,14 +25,24 @@ shard-*.parquet files, each row holding fixed-length `input_ids` /
 
 import os
 
+# HuggingFaceTB/dclm-edu ships ~2.9GB shards as a single Parquet row group
+# each. huggingface_hub's default Xet transfer backend fetches large files as
+# many concurrent chunked range-requests buffered in memory, which for a file
+# this size spikes RSS by 8-9GB+ well before the first row is even readable
+# -- easily OOM-killing a Colab instance before any progress is logged.
+# Disabling Xet falls back to a single-connection streaming download, which
+# is slower but bounds memory growth to one shard at a time instead of many
+# concurrent ones. Must be set before any huggingface_hub/datasets import.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
 from datasets import Dataset, interleave_datasets, load_dataset
 from jsonargparse import CLI
 from transformers import AutoTokenizer
 
-SOURCES = {
-    "fineweb-edu": dict(path="HuggingFaceTB/smollm-corpus", name="fineweb-edu-dedup", weight=0.60),
-    "dclm": dict(path="HuggingFaceTB/dclm-edu", name=None, weight=0.40),
-    "cosmopedia-v2": dict(path="HuggingFaceTB/smollm-corpus", name="cosmopedia-v2", weight=0.04),
+SOURCE_PATHS = {
+    "fineweb-edu": dict(path="HuggingFaceTB/smollm-corpus", name="fineweb-edu-dedup"),
+    "dclm": dict(path="HuggingFaceTB/dclm-edu", name=None),
+    "cosmopedia-v2": dict(path="HuggingFaceTB/smollm-corpus", name="cosmopedia-v2"),
 }
 
 
@@ -57,6 +67,9 @@ def process(
     seed: int = 42,
     shuffle_buffer_size: int = 10_000,
     log_every: int = 1_000,
+    fineweb_edu_weight: float = 0.60,
+    dclm_weight: float = 0.40,
+    cosmopedia_v2_weight: float = 0.04,
 ):
     """
     Args:
@@ -72,6 +85,13 @@ def process(
             yields nothing until this many of its examples have been fetched,
             so lower it (e.g. 0 to disable) for quick local smoke tests.
         log_every: print progress every this many raw documents consumed.
+        fineweb_edu_weight: mix weight for fineweb-edu-dedup.
+        dclm_weight: mix weight for dclm-edu. Set to 0 to skip it entirely --
+            useful for cheap smoke tests, since its ~2.9GB single-row-group
+            shards need ~9GB+ of RAM to read even one row from and aren't
+            needed to sanity-check the pipeline. Remaining weights are
+            renormalized automatically.
+        cosmopedia_v2_weight: mix weight for cosmopedia-v2.
     """
     os.makedirs(save_path, exist_ok=True)
 
@@ -79,11 +99,14 @@ def process(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    weights = [s["weight"] for s in SOURCES.values()]
-    total_weight = sum(weights)
-    probabilities = [w / total_weight for w in weights]
+    weights = {"fineweb-edu": fineweb_edu_weight, "dclm": dclm_weight, "cosmopedia-v2": cosmopedia_v2_weight}
+    active = {k: w for k, w in weights.items() if w > 0}
+    if not active:
+        raise ValueError("all source weights are 0 -- nothing to mix")
+    total_weight = sum(active.values())
+    probabilities = [w / total_weight for w in active.values()]
 
-    streams = [load_source(spec, seed, shuffle_buffer_size) for spec in SOURCES.values()]
+    streams = [load_source(SOURCE_PATHS[name], seed, shuffle_buffer_size) for name in active]
     mixed = interleave_datasets(streams, probabilities=probabilities, seed=seed)
 
     block_len = max_length + 1
