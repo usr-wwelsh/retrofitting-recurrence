@@ -649,13 +649,19 @@ def startup(cfg: CLISettings):
 
     cfg.world_size = world_size
     if is_main_process():
-        wandb.init(
-            project=cfg.wandb_project,
-            name=cfg.run_name,
-            config=cfg,
-            dir=cfg.out_path,
-            mode="disabled" if cfg.wandb_disabled else "online",
-        )
+        try:
+            wandb.init(
+                project=cfg.wandb_project,
+                name=cfg.run_name,
+                config=cfg,
+                dir=cfg.out_path,
+                mode="disabled" if cfg.wandb_disabled else "online",
+            )
+        except Exception as e:
+            # wandb is a nice-to-have, not a training dependency -- a bad/expired
+            # WANDB_API_KEY (or any other wandb-side failure) shouldn't kill the run
+            print(f"wandb.init() failed ({e}) -- continuing without wandb logging.")
+            wandb.init(mode="disabled")
 
     return state, local_device
 
