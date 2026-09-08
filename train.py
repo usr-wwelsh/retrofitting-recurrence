@@ -773,6 +773,7 @@ def train(state, device, cfg, data_start_step=1, optimizer_step=0, total_tokens_
     total_tokens_with_loss = 0
     tokens_in_step = 0
     k_mean_tracker = [0,0]
+    nan_alerted = False
     elapsed_time = 0.0
 
     output_details = {
@@ -914,6 +915,15 @@ def train(state, device, cfg, data_start_step=1, optimizer_step=0, total_tokens_
                 total_tokens_with_loss_to_log = total_tokens_with_loss_from_restart + agg_metrics.pop("total_tokens_with_loss")
                 elapsed_time_to_log = elapsed_time_from_restart + elapsed_time
 
+                if not nan_alerted and not (math.isfinite(float(loss)) and math.isfinite(total_norm)):
+                    nan_alerted = True
+                    if is_main_process():
+                        wandb.alert(
+                            title="Training diverged",
+                            text=f"Run {cfg.run_name} hit a non-finite loss/grad-norm at optimizer step {optimizer_step}: loss={float(loss):.4f}, grad_norm={total_norm:.4f}",
+                            level=wandb.AlertLevel.ERROR,
+                        )
+
                 if is_main_process():
                     wandb.log({
                         "train/step": optimizer_step,
@@ -1022,9 +1032,14 @@ def guarded_main():
         run_name = main()
         print("--------------------------------------------------------------------")
         print(f"Run {run_name} finished without error.")
-    except BaseException:
+    except BaseException as e:
         print("--------------------------------------------------------------------")
         print("Run finished with errors.")
+        if is_main_process():
+            try:
+                wandb.alert(title="Training crashed", text=f"{type(e).__name__}: {e}"[:2000], level=wandb.AlertLevel.ERROR)
+            except Exception:
+                pass  # wandb may not be initialized yet (e.g. crash during model download) -- don't mask the real error
         raise
     finally:
         shutdown()  # guarantee NCCL deconstruction
