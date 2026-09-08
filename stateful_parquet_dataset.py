@@ -93,12 +93,13 @@ class ParquetStreamPure(IterableDataset):
                 # Refill buffer from current position
                 pf = pq.ParquetFile(self.parquet_files[self._state["file_idx"]])
                 if self._state["row_group_idx"] >= pf.num_row_groups:
-                    print(
-                        f"Rank {self.process_rank} | {self._state['file_idx']}-{self._state['row_group_idx']} | "
-                        f" New file: {self.parquet_files[self._state['file_idx'] + 1]}"
-                    )
                     self._state["file_idx"] += 1
                     self._state["row_group_idx"] = 0
+                    if self._state["file_idx"] < len(self.parquet_files):
+                        print(
+                            f"Rank {self.process_rank} | {self._state['file_idx']}-{self._state['row_group_idx']} | "
+                            f" New file: {self.parquet_files[self._state['file_idx']]}"
+                        )
                     continue
 
                 self._read_buffer(pf)
@@ -141,9 +142,12 @@ class ParquetStreamPure(IterableDataset):
             device="cuda",
         )
 
-        # Single gather for all state
-        gathered_states = [torch.zeros_like(local_state) for _ in range(torch.distributed.get_world_size())]
-        torch.distributed.all_gather(gathered_states, local_state)
+        # Single gather for all state (skipped outside distributed training -- e.g. single-GPU Colab)
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            gathered_states = [torch.zeros_like(local_state) for _ in range(torch.distributed.get_world_size())]
+            torch.distributed.all_gather(gathered_states, local_state)
+        else:
+            gathered_states = [local_state]
 
         result = {
             "file_idx": [s[0].item() for s in gathered_states],
@@ -156,7 +160,7 @@ class ParquetStreamPure(IterableDataset):
         return result
 
     def load_state_dict(self, state_dict, offset_ranks=False):
-        rank = torch.distributed.get_rank()
+        rank = torch.distributed.get_rank() if (torch.distributed.is_available() and torch.distributed.is_initialized()) else 0
 
         def get_value(key):  # helper for backward compat
             effective_rank = rank % len(state_dict["fingerprint"])
