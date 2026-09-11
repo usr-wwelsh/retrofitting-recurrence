@@ -371,7 +371,14 @@ def startup(cfg: CLISettings):
         )
 
     elif cfg.muon["use_muon"]:
-        from muon import MuonWithAuxAdam
+        # MuonWithAuxAdam's step() calls dist.get_world_size()/dist.all_gather()
+        # unconditionally (splits Newton-Schulz work across ranks) -- it raises
+        # ValueError on the very first optimizer.step() if no process group was
+        # initialized, which startup() only does when torch.cuda.device_count() > 1.
+        # SingleDeviceMuonWithAuxAdam is the same algorithm minus the cross-rank
+        # sharding, so single-GPU runs (Colab, a single RunPod instance) still work.
+        from muon import MuonWithAuxAdam, SingleDeviceMuonWithAuxAdam
+        MuonWithAuxAdam = MuonWithAuxAdam if distributed else SingleDeviceMuonWithAuxAdam
 
         body_params = []
         non_body_params = []
