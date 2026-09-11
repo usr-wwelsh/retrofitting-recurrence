@@ -19,6 +19,21 @@ transformers==4.51.0" note). 0.19.1 is the newest trl release whose transformers
 raven_modeling_minimal.py's generate()/iterate_forward -- same kwarg multi_recurence_eval.py
 and the lm-eval-harness model_args use) via GRPOConfig.generation_kwargs, so rollouts actually
 exercise the trained recurrence depth instead of silently falling back to config default.
+
+Default hyperparameters target a real RLVR lift, not a smoke test: TRL's GRPOConfig requires
+`per_device_train_batch_size * num_processes * gradient_accumulation_steps` (the "generation
+batch") to be evenly divisible by num_generations -- the previous defaults
+(micro_batch_size=4, num_generations=8, no gradient_accumulation_steps) violated this and
+GRPOTrainer() raised ValueError before training could start. Now: micro_batch_size=8,
+gradient_accumulation_steps=8 -> generation_batch_size=64, giving 4 distinct prompts per
+optimizer step (64/num_generations=16) instead of the degenerate single-prompt-per-step case
+you'd get at generation_batch_size==num_generations. max_steps=2000 * 4 prompts/step ~= one
+full epoch over the combined 7,847-row gsm8k+mbpp set (mix_grpo_data.py's default output) --
+the crash-avoiding minimum (micro_batch_size=8, num_generations unchanged, max_steps=500)
+would have covered well under a quarter of that. max_completion_length raised 512->768 so
+GSM8K CoT + MBPP solutions aren't truncated mid-answer. save_total_limit=1 prunes local GRPO
+checkpoints the same way train.py's save_checkpoint/save_model_only already do -- otherwise
+HF Trainer keeps every save_interval checkpoint on disk forever.
 """
 
 import os
@@ -47,13 +62,15 @@ def main(
     run_name: str,
     hub_checkpoint_repo: str | None = None,
     mean_recurrence: int = 8,
-    max_steps: int = 500,
-    learning_rate: float = 1e-6,
-    num_generations: int = 8,
+    max_steps: int = 2000,
+    learning_rate: float = 2e-6,
+    num_generations: int = 16,
     max_prompt_length: int = 512,
-    max_completion_length: int = 512,
-    micro_batch_size: int = 4,
-    save_interval: int = 50,
+    max_completion_length: int = 768,
+    micro_batch_size: int = 8,
+    gradient_accumulation_steps: int = 8,
+    save_interval: int = 100,
+    save_total_limit: int = 1,
     wandb_disabled: bool = False,
     wandb_project: str = "smollm2-recurrent",
 ):
@@ -68,7 +85,10 @@ def main(
         mean_recurrence: recurrence depth for rollout generation -- forwarded as generate()'s
             `num_steps` kwarg, should match the checkpoint's trained ceiling.
         max_steps, learning_rate, num_generations, max_prompt_length, max_completion_length,
-            micro_batch_size, save_interval: GRPOConfig hyperparameters.
+            micro_batch_size, gradient_accumulation_steps, save_interval, save_total_limit:
+            GRPOConfig hyperparameters -- see module docstring for why the defaults are sized
+            the way they are. micro_batch_size * gradient_accumulation_steps must stay a
+            multiple of num_generations or GRPOTrainer() raises at construction time.
         wandb_disabled, wandb_project: same convention as train.py.
     """
     os.environ["WANDB_PROJECT"] = wandb_project
@@ -94,7 +114,9 @@ def main(
         max_prompt_length=max_prompt_length,
         max_completion_length=max_completion_length,
         per_device_train_batch_size=micro_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
         save_steps=save_interval,
+        save_total_limit=save_total_limit,
         generation_kwargs={"num_steps": mean_recurrence},
         report_to=["wandb"] if not wandb_disabled else [],
     )
