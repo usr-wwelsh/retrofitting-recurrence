@@ -1,13 +1,24 @@
 """
-Streams and packs the SmolLM2-recurrent continued-pretraining mix at its
-native 60% FineWeb-Edu / 40% DCLM / ~4% Cosmopedia-v2 ratio, without any of
-the cluster-specific assumptions in mix_datasets.py / preprocess_data_packing.py
+Streams and packs a SmolLM2-recurrent continued-pretraining mix, without any
+of the cluster-specific assumptions in mix_datasets.py / preprocess_data_packing.py
 (no hardcoded /p/vast paths, no num_proc=96) -- meant to run on a single
-Colab/Kaggle machine.
+Colab/Kaggle machine. Source weights are CLI-configurable (each --*_weight
+flag below); the defaults are the original 60% FineWeb-Edu / 40% DCLM / ~4%
+Cosmopedia-v2 ratio, with the two reasoning sources off (weight 0) unless
+opted into for a diversify/math/code curriculum phase.
 
 Note: HuggingFaceTB/smollm-corpus does NOT itself contain a DCLM split (it
 only has cosmopedia-v2, fineweb-edu-dedup, python-edu) -- DCLM is pulled
 from the separate, edu-filtered HuggingFaceTB/dclm-edu dataset instead.
+
+The paper's math-curriculum ingredient (nvidia/Nemotron-CC-Math-v1) is gated
+behind a corporate-only license click-through, so it's skipped in favor of
+two ungated, Apache-2.0, flat-"text" alternatives from the Institute of
+Foundation Models: IFM/Math-Reasoning (config "math-thinking-oss" -- worked
+chain-of-thought math solutions) and IFM/Code-Reasoning (config
+"code-thinking-v1" -- reasoning-annotated coding problems). Both are
+multi-billion-row/TB-scale sources but streamed, so only the slice needed
+to hit token_budget is ever pulled.
 
 Unlike preprocess_data_packing.py's use of trl.pack_dataset (which needs a
 materialized, sharded Dataset), this packs a live IterableDataset stream
@@ -43,6 +54,8 @@ SOURCE_PATHS = {
     "fineweb-edu": dict(path="HuggingFaceTB/smollm-corpus", name="fineweb-edu-dedup"),
     "dclm": dict(path="HuggingFaceTB/dclm-edu", name=None),
     "cosmopedia-v2": dict(path="HuggingFaceTB/smollm-corpus", name="cosmopedia-v2"),
+    "math-reasoning": dict(path="IFM/Math-Reasoning", name="math-thinking-oss"),
+    "code-reasoning": dict(path="IFM/Code-Reasoning", name="code-thinking-v1"),
 }
 
 
@@ -70,6 +83,8 @@ def process(
     fineweb_edu_weight: float = 0.60,
     dclm_weight: float = 0.40,
     cosmopedia_v2_weight: float = 0.04,
+    math_reasoning_weight: float = 0.0,
+    code_reasoning_weight: float = 0.0,
 ):
     """
     Args:
@@ -92,6 +107,12 @@ def process(
             needed to sanity-check the pipeline. Remaining weights are
             renormalized automatically.
         cosmopedia_v2_weight: mix weight for cosmopedia-v2.
+        math_reasoning_weight: mix weight for IFM/Math-Reasoning
+            (math-thinking-oss config). 0 by default -- opt in for the
+            math/reasoning curriculum phase.
+        code_reasoning_weight: mix weight for IFM/Code-Reasoning
+            (code-thinking-v1 config). 0 by default -- opt in for the
+            code/reasoning curriculum phase.
     """
     os.makedirs(save_path, exist_ok=True)
 
@@ -99,7 +120,13 @@ def process(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    weights = {"fineweb-edu": fineweb_edu_weight, "dclm": dclm_weight, "cosmopedia-v2": cosmopedia_v2_weight}
+    weights = {
+        "fineweb-edu": fineweb_edu_weight,
+        "dclm": dclm_weight,
+        "cosmopedia-v2": cosmopedia_v2_weight,
+        "math-reasoning": math_reasoning_weight,
+        "code-reasoning": code_reasoning_weight,
+    }
     active = {k: w for k, w in weights.items() if w > 0}
     if not active:
         raise ValueError("all source weights are 0 -- nothing to mix")
