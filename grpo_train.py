@@ -20,6 +20,19 @@ raven_modeling_minimal.py's generate()/iterate_forward -- same kwarg multi_recur
 and the lm-eval-harness model_args use) via GRPOConfig.generation_kwargs, so rollouts actually
 exercise the trained recurrence depth instead of silently falling back to config default.
 
+--criterion is opt-in (default None) and switches rollout generation to the model's existing
+generate_with_adaptive_compute() path (raven_modeling_minimal.py's generate() dispatches there
+the moment "criterion" is a key in generation_kwargs at all, regardless of value -- so
+_build_generation_kwargs must omit the key entirely when off, not pass "none"). This lets GRPO
+rollouts spend more loops on sequences that haven't converged yet (math/code CoT) and exit
+early on ones that have (easy/general continuations), instead of every token paying the same
+fixed mean_recurrence cost. Caveat before trusting this for a real run: GRPOTrainer recomputes
+per-token logprobs for the policy loss via a separate forward() call, not generate() --
+confirm that recompute path also uses adaptive depth (or intentionally matches the adaptive
+rollout's effective step count) before relying on it, since a depth mismatch between rollout
+and logprob-recompute would bias the importance weights. Watch train/kl and reward variance in
+wandb on the first run with this enabled.
+
 Default hyperparameters target a real RLVR lift, not a smoke test: TRL's GRPOConfig requires
 `per_device_train_batch_size * num_processes * gradient_accumulation_steps` (the "generation
 batch") to be evenly divisible by num_generations -- the previous defaults
@@ -55,6 +68,14 @@ def _code_reward_fn(completions, test_list, test_setup_code, **_kwargs):
     return code_reward(completions, test_list, setup_code=test_setup_code)
 
 
+def _build_generation_kwargs(mean_recurrence: int, criterion: str | None, exit_threshold: str) -> dict:
+    kwargs = {"num_steps": mean_recurrence}
+    if criterion is not None:
+        kwargs["criterion"] = criterion
+        kwargs["exit_threshold"] = exit_threshold
+    return kwargs
+
+
 def main(
     model_name: str,
     dataset_path: str,
@@ -62,6 +83,8 @@ def main(
     run_name: str,
     hub_checkpoint_repo: str | None = None,
     mean_recurrence: int = 8,
+    criterion: str | None = None,
+    exit_threshold: str = "auto",
     max_steps: int = 2000,
     learning_rate: float = 2e-6,
     num_generations: int = 16,
@@ -84,6 +107,11 @@ def main(
         hub_checkpoint_repo: if set, push the final model here (HF model repo).
         mean_recurrence: recurrence depth for rollout generation -- forwarded as generate()'s
             `num_steps` kwarg, should match the checkpoint's trained ceiling.
+        criterion: adaptive-compute exit criterion ("latent-diff", "entropy-diff", "minp-kl",
+            "kl", "argmax-stability"), or None (default) to keep every rollout step at a fixed
+            mean_recurrence. See module docstring for the logprob-recompute caveat.
+        exit_threshold: threshold for `criterion`, or "auto" for that criterion's default.
+            Ignored when criterion is None.
         max_steps, learning_rate, num_generations, max_prompt_length, max_completion_length,
             micro_batch_size, gradient_accumulation_steps, save_interval, save_total_limit:
             GRPOConfig hyperparameters -- see module docstring for why the defaults are sized
@@ -117,7 +145,7 @@ def main(
         gradient_accumulation_steps=gradient_accumulation_steps,
         save_steps=save_interval,
         save_total_limit=save_total_limit,
-        generation_kwargs={"num_steps": mean_recurrence},
+        generation_kwargs=_build_generation_kwargs(mean_recurrence, criterion, exit_threshold),
         report_to=["wandb"] if not wandb_disabled else [],
     )
 
