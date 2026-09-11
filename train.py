@@ -54,6 +54,7 @@ class CLISettings:
         default_factory=lambda: dict(q_col="question", a_col="answer")
     )
     dataset_config: str = "main"
+    sys_prompt: str = "You are a helpful assistant that can assist users with mathematical reasoning."
     max_length: Optional[int] = None
     max_samples: Optional[int] = None
     # impl
@@ -278,8 +279,6 @@ def get_unwrapped_model(state):
 ####################################################################################################
 # Main driver functions.
 ####################################################################################################
-# DEFAULT_SYS_PROMPT = "You are a helpful assistant that can help users with mathematical reasoning."
-DEFAULT_SYS_PROMPT = "You are a helpful assistant that can assist users with mathematical reasoning."
 
 def initialize_state_monkeypatch(self, input_embeds, scale: float = 1.0, patched_std: float = 0.008703882797784892, patched_embed_scale: float = 1.0):
     """
@@ -480,7 +479,7 @@ def startup(cfg: CLISettings):
         for idx in range(len(examples[cfg.dataset_args["q_col"]])):
             if cfg.dataset_args["q_col"] != "text":
                 messages = [
-                    Message(role="system", content=DEFAULT_SYS_PROMPT),
+                    Message(role="system", content=cfg.sys_prompt),
                     Message(role="user", content=examples[cfg.dataset_args["q_col"]][idx].strip()),
                     Message(role="Huginn", content=examples[cfg.dataset_args["a_col"]][idx].strip()),
                 ]
